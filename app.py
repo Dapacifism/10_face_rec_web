@@ -8,8 +8,7 @@ import pickle
 import face_recognition
 import numpy as np
 from picamera2 import Picamera2
-import subprocess
-import sys
+import shutil
 
 app = Flask(__name__)
 
@@ -19,6 +18,7 @@ current_frame = None
 frame_lock = threading.Lock()
 known_face_encodings = []
 known_face_names = []
+unknown_face_counter = 0
 
 # Initialize camera
 def init_camera():
@@ -53,7 +53,7 @@ def load_encodings():
 load_encodings()
 
 def generate_frames():
-    global recognition_active, current_frame, camera
+    global recognition_active, current_frame, camera, unknown_face_counter
     
     if camera is None:
         camera = init_camera()
@@ -64,7 +64,7 @@ def generate_frames():
         try:
             frame = camera.capture_array()
             
-            if recognition_active and len(known_face_encodings) > 0:
+            if recognition_active:
                 # Perform face recognition
                 frame = process_frame_for_recognition(frame)
             
@@ -85,7 +85,7 @@ def generate_frames():
             time.sleep(1)
 
 def process_frame_for_recognition(frame):
-    global known_face_encodings, known_face_names
+    global known_face_encodings, known_face_names, unknown_face_counter
     
     # Resize for faster processing
     small_frame = cv2.resize(frame, (0, 0), fx=0.25, fy=0.25)
@@ -97,6 +97,7 @@ def process_frame_for_recognition(frame):
     
     face_names = []
     for face_encoding in face_encodings:
+        # Check if the face is a match for the known faces
         matches = face_recognition.compare_faces(known_face_encodings, face_encoding)
         name = "Unknown"
         
@@ -105,10 +106,14 @@ def process_frame_for_recognition(frame):
             best_match_index = np.argmin(face_distances)
             if matches[best_match_index]:
                 name = known_face_names[best_match_index]
+            else:
+                # This is an unknown face
+                unknown_face_counter += 1
+                name = f"Unknown_{unknown_face_counter}"
         
         face_names.append(name)
     
-    # Display results
+    # Display results with different colors for known/unknown
     for (top, right, bottom, left), name in zip(face_locations, face_names):
         # Scale back up face locations
         top *= 4
@@ -116,9 +121,17 @@ def process_frame_for_recognition(frame):
         bottom *= 4
         left *= 4
         
+        # Choose color based on whether face is known or unknown
+        if name.startswith("Unknown"):
+            # Red for unknown faces
+            color = (0, 0, 255)  # Red
+        else:
+            # Green for known faces
+            color = (0, 255, 0)  # Green
+        
         # Draw box and label
-        cv2.rectangle(frame, (left, top), (right, bottom), (0, 255, 0), 2)
-        cv2.rectangle(frame, (left, bottom - 35), (right, bottom), (0, 255, 0), cv2.FILLED)
+        cv2.rectangle(frame, (left, top), (right, bottom), color, 2)
+        cv2.rectangle(frame, (left, bottom - 35), (right, bottom), color, cv2.FILLED)
         cv2.putText(frame, name, (left + 6, bottom - 6), 
                    cv2.FONT_HERSHEY_DUPLEX, 0.8, (255, 255, 255), 1)
     
@@ -163,6 +176,68 @@ def capture_photos_directly(name, photo_count=10):
         print(f"Error capturing photos: {e}")
         return False
 
+
+def delete_user_directly(username):
+    """Delete a user from the system"""
+    try:
+        dataset_folder = "dataset"
+        user_folder = os.path.join(dataset_folder, username)
+        
+        if os.path.exists(user_folder):
+            shutil.rmtree(user_folder)
+            print(f"Deleted user folder: {user_folder}")
+            
+            # Check if there are any users left
+            remaining_users = [name for name in os.listdir(dataset_folder) 
+                             if os.path.isdir(os.path.join(dataset_folder, name))]
+            
+            if len(remaining_users) == 0:
+                print("[INFO] No users left - creating empty encodings file")
+                # Create empty encodings file
+                data = {"encodings": [], "names": []}
+                with open("encodings.pickle", "wb") as f:
+                    f.write(pickle.dumps(data))
+                # Reload empty encodings
+                load_encodings()
+                return True
+            else:
+                # Retrain the model with remaining users
+                if train_model():
+                    return True
+                else:
+                    return False
+        else:
+            print(f"User folder not found: {user_folder}")
+            return False
+            
+    except Exception as e:
+        print(f"Error deleting user: {e}")
+        return False
+
+def delete_all_users_directly():
+    """Delete all users and reset the system"""
+    try:
+        dataset_folder = "dataset"
+        
+        if os.path.exists(dataset_folder):
+            # Remove entire dataset folder
+            shutil.rmtree(dataset_folder)
+            print("Deleted all user data")
+        
+        # Create empty encodings file
+        data = {"encodings": [], "names": []}
+        with open("encodings.pickle", "wb") as f:
+            f.write(pickle.dumps(data))
+        
+        # Reload empty encodings
+        load_encodings()
+        print("System reset - all users deleted and encodings cleared")
+        return True
+        
+    except Exception as e:
+        print(f"Error deleting all users: {e}")
+        return False
+
 @app.route('/')
 def index():
     return render_template('index.html')
@@ -176,8 +251,9 @@ def video_feed():
 
 @app.route('/recognition')
 def recognition():
-    global recognition_active
+    global recognition_active, unknown_face_counter
     recognition_active = True
+    unknown_face_counter = 0  # Reset counter
     load_encodings()  # Reload encodings in case new ones were added
     return render_template('recognition.html')
 
@@ -186,6 +262,12 @@ def enroll():
     global recognition_active
     recognition_active = False
     return render_template('enroll.html')
+
+@app.route('/manage')
+def manage():
+    global recognition_active
+    recognition_active = False
+    return render_template('manage.html')
 
 @app.route('/capture_photos', methods=['POST'])
 def capture_photos():
@@ -220,16 +302,71 @@ def train_model():
             load_encodings()
             return jsonify({'status': 'success', 'message': 'Model trained successfully'})
         else:
-            return jsonify({'status': 'error', 'message': 'Model training failed - no faces found'})
+            return jsonify({'status': 'error', 'message': 'Model training failed - no faces found in dataset'})
     
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)})
+
+@app.route('/delete_user', methods=['POST'])
+def delete_user():
+    try:
+        data = request.get_json()
+        username = data.get('username', '')
+        
+        if not username:
+            return jsonify({'status': 'error', 'message': 'No username provided'})
+        
+        success = delete_user_directly(username)
+        
+        if success:
+            return jsonify({'status': 'success', 'message': f'User {username} deleted successfully'})
+        else:
+            return jsonify({'status': 'error', 'message': f'Failed to delete user {username}'})
+    
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)})
+    
+
+@app.route('/delete_all_users', methods=['POST'])
+def delete_all_users():
+    """Delete all users and reset the system"""
+    try:
+        success = delete_all_users_directly()
+        
+        if success:
+            return jsonify({'status': 'success', 'message': 'All users deleted successfully'})
+        else:
+            return jsonify({'status': 'error', 'message': 'Failed to delete all users'})
+    
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)})    
 
 @app.route('/stop_recognition')
 def stop_recognition():
     global recognition_active
     recognition_active = False
     return jsonify({'status': 'stopped'})
+
+@app.route('/get_system_status')
+def get_system_status():
+    """Get current system status including number of registered faces"""
+    try:
+        # Count actual unique users from the dataset folder
+        dataset_path = "dataset"
+        unique_users = []
+        if os.path.exists(dataset_path):
+            unique_users = [name for name in os.listdir(dataset_path) 
+                          if os.path.isdir(os.path.join(dataset_path, name))]
+        
+        status = {
+            'registered_users_count': len(unique_users),
+            'registered_users_list': unique_users,
+            'face_encodings_count': len(known_face_encodings),
+            'recognition_active': recognition_active
+        }
+        return jsonify(status)
+    except Exception as e:
+        return jsonify({'error': str(e)})
 
 @app.route('/get_registered_users')
 def get_registered_users():

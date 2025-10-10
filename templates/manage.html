@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Manage Users - Face Recognition System</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+
+<body>
+    <div class="container">
+        <h1>Manage Registered Users</h1>
+
+        <div class="manage-section">
+            <div class="system-status">
+                <h3>System Status</h3>
+                <div class="user-stats">
+                    <div class="stat-item">
+                        <div class="stat-value" id="userCount">0</div>
+                        <div class="stat-label">Registered People</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-value" id="encodingCount">0</div>
+                        <div class="stat-label">Face Encodings</div>
+                    </div>
+                </div>
+                <div class="user-list-info">
+                    <p><strong>Registered Users:</strong> <span id="userList">Loading...</span></p>
+                    <p><small>Note: Multiple encodings per person improve recognition accuracy</small></p>
+                </div>
+            </div>
+
+            <div class="users-list">
+                <h3>Registered Users</h3>
+                <div id="usersContainer" class="users-container">
+                    <p>Loading users...</p>
+                </div>
+            </div>
+
+            <div class="controls">
+                <button onclick="refreshUsers()" class="btn">Refresh List</button>
+                <button onclick="deleteAllUsers()" class="btn btn-danger" id="deleteAllBtn">Delete All Users</button>
+                <a href="{{ url_for('index') }}" class="btn btn-secondary">Back to Home</a>
+            </div>
+
+            <div class="instructions">
+                <h3>Management Instructions:</h3>
+                <ul>
+                    <li>Click "Delete" next to any user to remove them from the system</li>
+                    <li>Use "Delete All Users" to completely reset the system</li>
+                    <li>The system will automatically clear all encodings when no users remain</li>
+                    <li>Use "Refresh List" to see current registered users</li>
+                </ul>
+            </div>
+
+            <div id="message" class="message"></div>
+        </div>
+    </div>
+
+    <script>
+        // Load users and system status on page load
+        document.addEventListener('DOMContentLoaded', function () {
+            loadUsers();
+            loadSystemStatus();
+        });
+
+        function loadUsers() {
+            fetch('/get_registered_users')
+                .then(response => response.json())
+                .then(data => {
+                    const usersContainer = document.getElementById('usersContainer');
+
+                    if (data.users.length === 0) {
+                        usersContainer.innerHTML = '<p>No registered users found.</p>';
+                        return;
+                    }
+
+                    let usersHTML = '';
+                    data.users.forEach(user => {
+                        usersHTML += `
+                            <div class="user-item">
+                                <span class="user-name">${user}</span>
+                                <button onclick="deleteUser('${user}')" class="btn btn-delete">Delete</button>
+                            </div>
+                        `;
+                    });
+
+                    usersContainer.innerHTML = usersHTML;
+                })
+                .catch(error => {
+                    console.error('Error loading users:', error);
+                    document.getElementById('usersContainer').innerHTML = '<p>Error loading users.</p>';
+                });
+        }
+
+        function loadSystemStatus() {
+            fetch('/get_system_status')
+                .then(response => response.json())
+                .then(data => {
+                    document.getElementById('userCount').textContent = data.registered_users_count;
+                    document.getElementById('encodingCount').textContent = data.face_encodings_count;
+
+                    // Add user list display if you want to see who's registered
+                    const userListElement = document.getElementById('userList');
+                    if (userListElement) {
+                        if (data.registered_users_list.length > 0) {
+                            userListElement.innerHTML = data.registered_users_list.join(', ');
+                        } else {
+                            userListElement.innerHTML = 'No users registered';
+                        }
+                    }
+                })
+                .catch(error => {
+                    console.error('Error loading system status:', error);
+                });
+        }
+
+        function deleteUser(username) {
+            if (!confirm(`Are you sure you want to delete user "${username}"? This action cannot be undone.`)) {
+                return;
+            }
+
+            showMessage(`Deleting ${username}...`, 'info');
+
+            fetch('/delete_user', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ username: username })
+            })
+                .then(response => response.json())
+                .then(data => {
+                    showMessage(data.message, data.status);
+                    if (data.status === 'success') {
+                        // Reload the users list and status after a short delay
+                        setTimeout(() => {
+                            loadUsers();
+                            loadSystemStatus();
+                        }, 1000);
+                    }
+                })
+                .catch(error => {
+                    showMessage('Error: ' + error, 'error');
+                });
+        }
+
+        function deleteAllUsers() {
+            if (!confirm('Are you sure you want to delete ALL users? This will completely reset the system and cannot be undone!')) {
+                return;
+            }
+
+            showMessage('Deleting all users...', 'info');
+            document.getElementById('deleteAllBtn').disabled = true;
+
+            fetch('/delete_all_users', {
+                method: 'POST'
+            })
+                .then(response => response.json())
+                .then(data => {
+                    showMessage(data.message, data.status);
+                    document.getElementById('deleteAllBtn').disabled = false;
+
+                    if (data.status === 'success') {
+                        // Reload the users list and status after a short delay
+                        setTimeout(() => {
+                            loadUsers();
+                            loadSystemStatus();
+                        }, 1000);
+                    }
+                })
+                .catch(error => {
+                    showMessage('Error: ' + error, 'error');
+                    document.getElementById('deleteAllBtn').disabled = false;
+                });
+        }
+
+        function refreshUsers() {
+            showMessage('Refreshing user list...', 'info');
+            loadUsers();
+            loadSystemStatus();
+            setTimeout(() => {
+                showMessage('User list updated', 'success');
+            }, 500);
+        }
+
+        function showMessage(message, type) {
+            const messageDiv = document.getElementById('message');
+            messageDiv.textContent = message;
+            messageDiv.className = `message ${type}`;
+            messageDiv.style.display = 'block';
+
+            // Auto-hide success messages after 3 seconds
+            if (type === 'success') {
+                setTimeout(() => {
+                    messageDiv.style.display = 'none';
+                }, 3000);
+            }
+        }
+    </script>
+</body>
+
+</html>

@@ -1,25 +1,38 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Face Recognition</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
+
 <body>
     <div class="container">
         <h1>Face Recognition</h1>
-        
+
         <div class="recognition-section">
             <div class="video-container">
                 <img src="{{ url_for('video_feed') }}" width="640" height="480">
             </div>
-            
+
+            <div class="status-indicators">
+                <div class="status-item">
+                    <div class="status-color status-known"></div>
+                    <span>Known Faces</span>
+                </div>
+                <div class="status-item">
+                    <div class="status-color status-unknown"></div>
+                    <span>Unknown Faces</span>
+                </div>
+            </div>
+
             <div class="controls">
                 <button onclick="stopRecognition()" class="btn btn-stop">Stop Recognition</button>
                 <a href="{{ url_for('index') }}" class="btn btn-secondary">Back to Home</a>
             </div>
-            
+
             <div class="info">
                 <p>Recognition is active. The system will identify registered faces in real-time.</p>
             </div>
@@ -36,4 +49,5 @@
         }
     </script>
 </body>
+
 </html>
