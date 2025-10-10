@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Face Recognition System</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <div class="container">
+        <h1>Face Recognition System</h1>
+        <div class="menu">
+            <a href="{{ url_for('enroll') }}" class="btn">Enroll New Face</a>
+            <a href="{{ url_for('recognition') }}" class="btn">Start Recognition</a>
+        </div>
+        
+        <div class="stats">
+            <h3>System Status</h3>
+            <p>Registered Users: <span id="userCount">0</span></p>
+            <p>Camera: <span id="cameraStatus">Initializing...</span></p>
+        </div>
+    </div>
+
+    <script>
+        // Load user count on page load
+        fetch('/get_registered_users')
+            .then(response => response.json())
+            .then(data => {
+                document.getElementById('userCount').textContent = data.users.length;
+            });
+    </script>
+</body>
+</html>

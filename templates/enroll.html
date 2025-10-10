@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Enroll New Face</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <div class="container">
+        <h1>Enroll New Face</h1>
+        
+        <div class="enroll-section">
+            <div class="video-container">
+                <img src="{{ url_for('video_feed') }}" width="640" height="480">
+            </div>
+            
+            <div class="controls">
+                <input type="text" id="personName" placeholder="Enter person's name" required>
+                <button onclick="capturePhotos()" class="btn">Capture Photos</button>
+                <button onclick="trainModel()" class="btn">Train Model</button>
+                <a href="{{ url_for('index') }}" class="btn btn-secondary">Back to Home</a>
+            </div>
+            
+            <div id="message" class="message"></div>
+            
+            <div class="instructions">
+                <h3>Instructions:</h3>
+                <ol>
+                    <li>Enter the person's name</li>
+                    <li>Click "Capture Photos" - this will take multiple photos</li>
+                    <li>Click "Train Model" to update the recognition system</li>
+                    <li>Move to recognition page to test</li>
+                </ol>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function capturePhotos() {
+            const name = document.getElementById('personName').value;
+            if (!name) {
+                showMessage('Please enter a name', 'error');
+                return;
+            }
+            
+            showMessage('Capturing photos... Please wait.', 'info');
+            
+            fetch('/capture_photos', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ name: name })
+            })
+            .then(response => response.json())
+            .then(data => {
+                showMessage(data.message, data.status);
+            })
+            .catch(error => {
+                showMessage('Error: ' + error, 'error');
+            });
+        }
+        
+        function trainModel() {
+            showMessage('Training model... This may take a while.', 'info');
+            
+            fetch('/train_model', {
+                method: 'POST'
+            })
+            .then(response => response.json())
+            .then(data => {
+                showMessage(data.message, data.status);
+            })
+            .catch(error => {
+                showMessage('Error: ' + error, 'error');
+            });
+        }
+        
+        function showMessage(message, type) {
+            const messageDiv = document.getElementById('message');
+            messageDiv.textContent = message;
+            messageDiv.className = `message ${type}`;
+        }
+    </script>
+</body>
+</html>
