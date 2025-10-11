@@ -12,29 +12,41 @@
     <div class="container">
         <h1>Face Recognition</h1>
 
-        <div class="recognition-section">
-            <div class="video-container">
-                <img src="{{ url_for('video_feed') }}" width="640" height="480">
-            </div>
-
-            <div class="status-indicators">
-                <div class="status-item">
-                    <div class="status-color status-known"></div>
-                    <span>Known Faces</span>
+        <div class="recognition-wrapper">
+            <!-- Main frame and indicators -->
+            <div class="main-content">
+                <div class="video-container">
+                    <img src="{{ url_for('video_feed') }}" width="640" height="480">
                 </div>
-                <div class="status-item">
-                    <div class="status-color status-unknown"></div>
-                    <span>Unknown Faces</span>
+
+                <div class="status-indicators">
+                    <div class="status-item">
+                        <div class="status-color status-known"></div>
+                        <span>Known Faces</span>
+                    </div>
+                    <div class="status-item">
+                        <div class="status-color status-unknown"></div>
+                        <span>Unknown Faces</span>
+                    </div>
+                   
                 </div>
+
+                <div class="controls">
+                    <button onclick="stopRecognition()" class="btn btn-stop">Stop Recognition</button>
+                    <a href="{{ url_for('index') }}" class="btn btn-secondary">Back to Home</a>
+                </div>
+
+                 <div class="info">
+                        <p>Recognition is active. The system will identify registered faces in real-time.</p>
+                    </div>
+
+
             </div>
 
-            <div class="controls">
-                <button onclick="stopRecognition()" class="btn btn-stop">Stop Recognition</button>
-                <a href="{{ url_for('index') }}" class="btn btn-secondary">Back to Home</a>
-            </div>
-
-            <div class="info">
-                <p>Recognition is active. The system will identify registered faces in real-time.</p>
+            <!-- Recognition Log card -->
+            <div class="recognition-sidebar">
+                <h3>Recognition Log</h3>
+                <div id="recognition-log"></div>
             </div>
         </div>
     </div>
@@ -47,6 +59,40 @@
                     window.location.href = '/';
                 });
         }
+
+        function updateRecognitionLog() {
+            fetch('/current_detections')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.error) {
+                        console.error(data.error);
+                        return;
+                    }
+
+                    const logElement = document.getElementById('recognition-log');
+                    const logEntry = document.createElement('div');
+                    logEntry.className = 'log-entry';
+
+                    let logText = `[${data.timestamp}] `;
+                    if (data.detections.known.length > 0) {
+                        logText += `Known: ${data.detections.known.join(', ')} | `;
+                    }
+                    if (data.detections.unknown > 0) {
+                        logText += `Unknown: ${data.detections.unknown}`;
+                    }
+
+                    logEntry.textContent = logText;
+
+                    if (logElement.children.length >= 10) {
+                        logElement.removeChild(logElement.firstChild);
+                    }
+
+                    logElement.appendChild(logEntry);
+                    logElement.scrollTop = logElement.scrollHeight;
+                });
+        }
+
+        setInterval(updateRecognitionLog, 1000);
     </script>
 </body>
 

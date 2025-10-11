@@ -28,6 +28,7 @@ known_face_names = []
 unknown_face_counter = 0
 unknown_face_encodings = []  # Store encodings of detected unknown faces
 last_unknown_check = 0  # Time of last unknown face detection
+current_detections = {"known": [], "unknown": 0}  # Track current frame detections
 
 def buzz(duration=0.5):
     """Activate buzzer for a short duration"""
@@ -104,7 +105,10 @@ def generate_frames():
             time.sleep(1)
 
 def process_frame_for_recognition(frame):
-    global known_face_encodings, known_face_names, unknown_face_counter, unknown_face_encodings, last_unknown_check
+    global known_face_encodings, known_face_names, unknown_face_counter, unknown_face_encodings, last_unknown_check, current_detections
+    
+    # Reset current detections for this frame
+    current_detections = {"known": [], "unknown": 0}
     
     # Resize for faster processing
     small_frame = cv2.resize(frame, (0, 0), fx=0.25, fy=0.25)
@@ -126,6 +130,8 @@ def process_frame_for_recognition(frame):
             best_match_index = np.argmin(face_distances)
             if matches[best_match_index]:
                 name = known_face_names[best_match_index]
+                if name not in current_detections["known"]:
+                    current_detections["known"].append(name)
             else:
                 # Check if this unknown face matches any previously seen unknown faces
                 is_new_unknown = True
@@ -136,6 +142,7 @@ def process_frame_for_recognition(frame):
                         # Use existing unknown ID
                         unknown_index = unknown_matches.index(True)
                         name = f"Unknown_{unknown_index + 1}"
+                current_detections["unknown"] += 1
                 
                 if is_new_unknown:
                     # This is a new unknown face
@@ -171,6 +178,18 @@ def process_frame_for_recognition(frame):
         cv2.rectangle(frame, (left, bottom - 35), (right, bottom), color, cv2.FILLED)
         cv2.putText(frame, name, (left + 6, bottom - 6), 
                    cv2.FONT_HERSHEY_DUPLEX, 0.8, (255, 255, 255), 1)
+    
+    # Add the current detections summary
+    detection_text = []
+    if current_detections["known"]:
+        detection_text.append(f"Known: {', '.join(current_detections['known'])}")
+    if current_detections["unknown"] > 0:
+        detection_text.append(f"Unknown: {current_detections['unknown']}")
+    
+    if detection_text:
+        detection_summary = " | ".join(detection_text)
+        cv2.putText(frame, detection_summary, (10, 30), 
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
     
     return frame
 
@@ -384,7 +403,19 @@ def delete_all_users():
             return jsonify({'status': 'error', 'message': 'Failed to delete all users'})
     
     except Exception as e:
-        return jsonify({'status': 'error', 'message': str(e)})    
+        return jsonify({'status': 'error', 'message': str(e)})  
+
+@app.route('/current_detections')
+def get_current_detections():
+    """Get the current face detections"""
+    try:
+        return jsonify({
+            'timestamp': datetime.now().strftime('%H:%M:%S'),
+            'detections': current_detections
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)})  
+  
 
 @app.route('/stop_recognition')
 def stop_recognition():

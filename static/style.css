@@ -321,6 +321,70 @@ h1 {
     color: #666;
 }
 
+/* === Face Recognition Page Layout === */
+.recognition-wrapper {
+    display: flex;
+    justify-content: space-between;
+    gap: 20px;
+    margin-bottom: 30px;
+    flex-wrap: wrap;
+}
+
+.main-content {
+    flex: 3;
+    background: white;
+    padding: 20px;
+    border-radius: 15px;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+}
+
+.recognition-sidebar {
+    flex: 1.2;
+    background: white;
+    border-radius: 15px;
+    padding: 20px;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+    display: flex;
+    flex-direction: column;
+    height: fit-content;
+    max-height: 540px;
+}
+
+.recognition-sidebar h3 {
+    text-align: center;
+    margin-bottom: 10px;
+    color: #333;
+}
+
+#recognition-log {
+    background: #f8f9fa;
+    padding: 10px;
+    border-radius: 8px;
+    overflow-y: auto;
+    flex-grow: 1;
+    font-size: 14px;
+    border: 1px solid #ddd;
+}
+
+.log-entry {
+    padding: 6px 8px;
+    border-bottom: 1px solid #ddd;
+    color: #333;
+}
+
+/* Responsive: stack on mobile */
+@media (max-width: 900px) {
+    .recognition-wrapper {
+        flex-direction: column;
+    }
+
+    .recognition-sidebar {
+        max-height: none;
+        width: 100%;
+    }
+}
+
+
 @media (max-width: 768px) {
     .container {
         padding: 10px;
