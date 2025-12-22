@@ -29,8 +29,9 @@ unknown_face_counter = 0
 unknown_face_encodings = []  # Store encodings of detected unknown faces
 last_unknown_check = 0  # Time of last unknown face detection
 current_detections = {"known": [], "unknown": 0}  # Track current frame detections
+enrollment_in_progress = False  # When True, suppress alarm and unknown-encoding updates
 
-def buzz(duration=0.5):
+def buzz(duration=1):
     """Activate buzzer for a short duration"""
     try:
         lgpio.gpio_write(h, BUZZER_PIN, 1)
@@ -40,12 +41,30 @@ def buzz(duration=0.5):
         print(f"[BUZZER ERROR] {e}")
 
 
+def alarm_buzz(duration=3, on_interval=0.5, off_interval=0.2):
+    """Run an alarm-style buzzer: cycles on/off for the given duration.
+    This runs in its own thread so it won't block frame processing.
+    """
+    try:
+        start = time.time()
+        while time.time() - start < duration:
+            lgpio.gpio_write(h, BUZZER_PIN, 1)
+            time.sleep(on_interval)
+            lgpio.gpio_write(h, BUZZER_PIN, 0)
+            # If remaining time is small, break to avoid extra sleep
+            if time.time() - start + off_interval >= duration:
+                break
+            time.sleep(off_interval)
+    except Exception as e:
+        print(f"[ALARM BUZZ ERROR] {e}")
+
+
 # Initialize camera
 def init_camera():
     try:
         picam2 = Picamera2()
         picam2.configure(picam2.create_preview_configuration(
-            main={"format": 'XRGB8888', "size": (640, 480)}
+            main={"size": (1640, 1232), "format": "RGB888"},
         ))
         picam2.start()
         time.sleep(2)  # Camera warm-up
@@ -80,7 +99,10 @@ def generate_frames():
         if camera is None:
             return
     
-    while recognition_active:
+    # Always attempt to stream frames. Recognition is applied only when
+    # recognition_active is True. Using a perpetual loop lets preview mode
+    # stream frames even when recognition is disabled.
+    while True:
         try:
             frame = camera.capture_array()
             
@@ -121,40 +143,53 @@ def process_frame_for_recognition(frame):
     current_time = time.time()
     face_names = []
     for face_encoding in face_encodings:
-        # Check if the face is a match for the known faces
-        matches = face_recognition.compare_faces(known_face_encodings, face_encoding)
+        # Default to unknown
         name = "Unknown"
-        
-        face_distances = face_recognition.face_distance(known_face_encodings, face_encoding)
-        if len(face_distances) > 0:
-            best_match_index = np.argmin(face_distances)
-            if matches[best_match_index]:
-                name = known_face_names[best_match_index]
-                if name not in current_detections["known"]:
-                    current_detections["known"].append(name)
-            else:
+
+        # If we have known encodings, try to match. If there are none, we'll
+        # treat every face as unknown (useful after deleting all users).
+        matched_known = False
+        if len(known_face_encodings) > 0:
+            # Use stricter tolerance (0.5 or lower is more accurate, 0.6 is default but too loose)
+            matches = face_recognition.compare_faces(known_face_encodings, face_encoding, tolerance=0.5)
+            face_distances = face_recognition.face_distance(known_face_encodings, face_encoding)
+            if len(face_distances) > 0:
+                best_match_index = np.argmin(face_distances)
+                # Only accept if it matches AND the distance is below threshold (0.5 is recommended)
+                if matches[best_match_index] and face_distances[best_match_index] < 0.5:
+                    name = known_face_names[best_match_index]
+                    matched_known = True
+                    if name not in current_detections["known"]:
+                        current_detections["known"].append(name)
+
+        # Handle unknown faces (either no known encodings or no match)
+        if not matched_known:
                 # Check if this unknown face matches any previously seen unknown faces
                 is_new_unknown = True
-                if len(unknown_face_encodings) > 0:
-                    unknown_matches = face_recognition.compare_faces(unknown_face_encodings, face_encoding)
-                    if True in unknown_matches:
-                        is_new_unknown = False
-                        # Use existing unknown ID
-                        unknown_index = unknown_matches.index(True)
-                        name = f"Unknown_{unknown_index + 1}"
+                if not enrollment_in_progress:
+                    if len(unknown_face_encodings) > 0:
+                        unknown_matches = face_recognition.compare_faces(unknown_face_encodings, face_encoding)
+                        if True in unknown_matches:
+                            is_new_unknown = False
+                            unknown_index = unknown_matches.index(True)
+                            name = f"Unknown_{unknown_index + 1}"
+
                 current_detections["unknown"] += 1
-                
-                if is_new_unknown:
-                    # This is a new unknown face
+
+                if is_new_unknown and not enrollment_in_progress:
                     unknown_face_counter += 1
                     name = f"Unknown_{unknown_face_counter}"
                     unknown_face_encodings.append(face_encoding)
-                    
-                    # Only buzz if it's been more than 5 seconds since last alert
-                    if current_time - last_unknown_check > 5:
-                        threading.Thread(target=buzz, args=(0.5,), daemon=True).start()
+
+                # Trigger alarm buzz for unknown face detections unless we're enrolling.
+                if not enrollment_in_progress:
+                    # Use a cooldown so we don't continuously spawn alarm threads every frame.
+                    alarm_duration = 3
+                    cooldown = alarm_duration
+                    if current_time - last_unknown_check > cooldown:
+                        threading.Thread(target=alarm_buzz, args=(alarm_duration, 0.4, 0.15), daemon=True).start()
                         last_unknown_check = current_time
-        
+
         face_names.append(name)
     
     # Display results with different colors for known/unknown
@@ -174,10 +209,10 @@ def process_frame_for_recognition(frame):
             color = (0, 255, 0)  # Green
         
         # Draw box and label
-        cv2.rectangle(frame, (left, top), (right, bottom), color, 2)
+        cv2.rectangle(frame, (left, top), (right, bottom), color, 3)
         cv2.rectangle(frame, (left, bottom - 35), (right, bottom), color, cv2.FILLED)
         cv2.putText(frame, name, (left + 6, bottom - 6), 
-                   cv2.FONT_HERSHEY_DUPLEX, 0.8, (255, 255, 255), 1)
+                   cv2.FONT_HERSHEY_DUPLEX, 2, (255, 255, 255), 2)
     
     # Add the current detections summary
     detection_text = []
@@ -194,9 +229,11 @@ def process_frame_for_recognition(frame):
     return frame
 
 # Direct implementation of capture_photos to avoid import issues
-def capture_photos_directly(name, photo_count=10):
+def capture_photos_directly(name, photo_count=20):
     """Direct implementation of photo capture to avoid import issues"""
     try:
+        global enrollment_in_progress
+        enrollment_in_progress = True
         dataset_folder = "dataset"
         if not os.path.exists(dataset_folder):
             os.makedirs(dataset_folder)
@@ -231,6 +268,11 @@ def capture_photos_directly(name, photo_count=10):
     except Exception as e:
         print(f"Error capturing photos: {e}")
         return False
+    finally:
+        try:
+            enrollment_in_progress = False
+        except Exception:
+            pass
 
 
 def delete_user_directly(username):
@@ -301,9 +343,37 @@ def index():
 @app.route('/video_feed')
 def video_feed():
     global recognition_active
-    recognition_active = True
+    # Allow clients to request the feed in different modes. When mode is
+    # 'recognition' the frame processing will run recognition; when mode is
+    # anything else (for example 'preview' while enrolling) recognition is
+    # disabled and frames are streamed raw.
+    mode = request.args.get('mode', 'recognition')
+    recognition_active = True if mode == 'recognition' else False
     return Response(generate_frames(),
                    mimetype='multipart/x-mixed-replace; boundary=frame')
+
+
+@app.route('/start_enrollment', methods=['POST', 'GET'])
+def start_enrollment():
+    """Mark enrollment as in-progress so alarms and unknown-encoding updates
+    are suppressed while the user is enrolling."""
+    global enrollment_in_progress, recognition_active, unknown_face_encodings, unknown_face_counter, last_unknown_check
+    enrollment_in_progress = True
+    # Ensure recognition processing is disabled while enrolling
+    recognition_active = False
+    # Clear transient unknown state so enrollment isn't affected
+    unknown_face_encodings = []
+    unknown_face_counter = 0
+    last_unknown_check = 0
+    return jsonify({'status': 'ok', 'enrollment': 'started'})
+
+
+@app.route('/stop_enrollment', methods=['POST', 'GET'])
+def stop_enrollment():
+    """Clear the enrollment flag so normal recognition and alarms resume."""
+    global enrollment_in_progress
+    enrollment_in_progress = False
+    return jsonify({'status': 'ok', 'enrollment': 'stopped'})
 
 @app.route('/recognition')
 def recognition():

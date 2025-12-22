@@ -12,7 +12,8 @@
         
         <div class="enroll-section">
             <div class="video-container">
-                <img src="{{ url_for('video_feed') }}" width="640" height="480">
+                <!-- Video feed will be set to preview mode after signaling start_enrollment -->
+                <img id="videoFeed" src="" width="640" height="480" alt="Camera feed">
             </div>
             
             <div class="controls">
@@ -37,6 +38,37 @@
     </div>
 
     <script>
+        // Signal the server that enrollment is starting so alarms are suppressed
+        // and the feed will be served in preview mode (no recognition processing).
+        function startEnrollmentMode() {
+            fetch('/start_enrollment', { method: 'POST' })
+                .then(() => {
+                    // Set the video feed to preview mode
+                    const img = document.getElementById('videoFeed');
+                    img.src = '/video_feed?mode=preview';
+                })
+                .catch(err => {
+                    console.warn('Failed to start enrollment mode:', err);
+                    // Still attempt to set the preview feed
+                    document.getElementById('videoFeed').src = '/video_feed?mode=preview';
+                });
+        }
+
+        // Signal the server to stop enrollment mode (resume normal recognition)
+        function stopEnrollmentMode() {
+            try {
+                navigator.sendBeacon('/stop_enrollment');
+            } catch (e) {
+                // Fallback to fetch
+                fetch('/stop_enrollment', { method: 'POST' }).catch(() => {});
+            }
+        }
+
+        // Start enrollment when page loads
+        window.addEventListener('load', () => startEnrollmentMode());
+        // Stop enrollment when leaving the page
+        window.addEventListener('beforeunload', () => stopEnrollmentMode());
+
         function capturePhotos() {
             const name = document.getElementById('personName').value;
             if (!name) {
@@ -56,6 +88,9 @@
             .then(response => response.json())
             .then(data => {
                 showMessage(data.message, data.status);
+                // After photos are captured we can stop enrollment mode so the
+                // recognition feed resumes (train manually or via Train Model button)
+                stopEnrollmentMode();
             })
             .catch(error => {
                 showMessage('Error: ' + error, 'error');
